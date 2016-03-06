@@ -48,6 +48,13 @@ var View = FC.View = Class.extend({
 	// document handlers, bound to `this` object
 	documentMousedownProxy: null, // TODO: doesn't work with touch
 
+	// now indicator
+	isNowIndicatorRendered: null,
+	initialNowDate: null, // result first getNow call
+	initialNowQueriedMs: null, // ms time the getNow was called
+	nowIndicatorTimeoutID: null, // for refresh timing of now indicator
+	nowIndicatorIntervalID: null, // "
+
 
 	constructor: function(calendar, type, options, intervalDuration) {
 
@@ -316,22 +323,6 @@ var View = FC.View = Class.extend({
 	},
 
 
-	// If the view has already been displayed, tears it down and displays it again.
-	// Will re-render the events if necessary, which display/clear DO NOT do.
-	// TODO: make behavior more consistent.
-	redisplay: function() {
-		if (this.isSkeletonRendered) {
-			var wasEventsRendered = this.isEventsRendered;
-			this.clearEvents(); // won't trigger handlers if events never rendered
-			this.clearView();
-			this.displayView();
-			if (wasEventsRendered) { // only render and trigger handlers if events previously rendered
-				this.displayEvents();
-			}
-		}
-	},
-
-
 	// Displays the view's non-event content, such as date-related content or anything required by events.
 	// Renders the view's non-content skeleton if necessary.
 	// Can be asynchronous and return a promise.
@@ -349,6 +340,7 @@ var View = FC.View = Class.extend({
 		this.renderDates();
 		this.updateSize();
 		this.renderBusinessHours(); // might need coordinates, so should go after updateSize()
+		this.startNowIndicator();
 	},
 
 
@@ -356,6 +348,7 @@ var View = FC.View = Class.extend({
 	// Can be asynchronous and return a promise.
 	clearView: function() {
 		this.unselect();
+		this.stopNowIndicator();
 		this.triggerUnrender();
 		this.unrenderBusinessHours();
 		this.unrenderDates();
@@ -387,18 +380,6 @@ var View = FC.View = Class.extend({
 	// Unrenders the view's date-related content
 	unrenderDates: function() {
 		// subclasses should override
-	},
-
-
-	// Renders business-hours onto the view. Assumes updateSize has already been called.
-	renderBusinessHours: function() {
-		// subclasses should implement
-	},
-
-
-	// Unrenders previously-rendered business-hours
-	unrenderBusinessHours: function() {
-		// subclasses should implement
 	},
 
 
@@ -436,6 +417,110 @@ var View = FC.View = Class.extend({
 	},
 
 
+	/* Business Hours
+	------------------------------------------------------------------------------------------------------------------*/
+
+
+	// Renders business-hours onto the view. Assumes updateSize has already been called.
+	renderBusinessHours: function() {
+		// subclasses should implement
+	},
+
+
+	// Unrenders previously-rendered business-hours
+	unrenderBusinessHours: function() {
+		// subclasses should implement
+	},
+
+
+	/* Now Indicator
+	------------------------------------------------------------------------------------------------------------------*/
+
+
+	// Immediately render the current time indicator and begins re-rendering it at an interval,
+	// which is defined by this.getNowIndicatorUnit().
+	// TODO: somehow do this for the current whole day's background too
+	startNowIndicator: function() {
+		var _this = this;
+		var unit;
+		var update;
+		var delay; // ms wait value
+
+		if (this.opt('nowIndicator')) {
+			unit = this.getNowIndicatorUnit();
+			if (unit) {
+				update = proxy(this, 'updateNowIndicator'); // bind to `this`
+
+				this.initialNowDate = this.calendar.getNow();
+				this.initialNowQueriedMs = +new Date();
+				this.renderNowIndicator(this.initialNowDate);
+				this.isNowIndicatorRendered = true;
+
+				// wait until the beginning of the next interval
+				delay = this.initialNowDate.clone().startOf(unit).add(1, unit) - this.initialNowDate;
+				this.nowIndicatorTimeoutID = setTimeout(function() {
+					_this.nowIndicatorTimeoutID = null;
+					update();
+					delay = +moment.duration(1, unit);
+					delay = Math.max(100, delay); // prevent too frequent
+					_this.nowIndicatorIntervalID = setInterval(update, delay); // update every interval
+				}, delay);
+			}
+		}
+	},
+
+
+	// rerenders the now indicator, computing the new current time from the amount of time that has passed
+	// since the initial getNow call.
+	updateNowIndicator: function() {
+		if (this.isNowIndicatorRendered) {
+			this.unrenderNowIndicator();
+			this.renderNowIndicator(
+				this.initialNowDate.clone().add(new Date() - this.initialNowQueriedMs) // add ms
+			);
+		}
+	},
+
+
+	// Immediately unrenders the view's current time indicator and stops any re-rendering timers.
+	// Won't cause side effects if indicator isn't rendered.
+	stopNowIndicator: function() {
+		if (this.isNowIndicatorRendered) {
+
+			if (this.nowIndicatorTimeoutID) {
+				clearTimeout(this.nowIndicatorTimeoutID);
+				this.nowIndicatorTimeoutID = null;
+			}
+			if (this.nowIndicatorIntervalID) {
+				clearTimeout(this.nowIndicatorIntervalID);
+				this.nowIndicatorIntervalID = null;
+			}
+
+			this.unrenderNowIndicator();
+			this.isNowIndicatorRendered = false;
+		}
+	},
+
+
+	// Returns a string unit, like 'second' or 'minute' that defined how often the current time indicator
+	// should be refreshed. If something falsy is returned, no time indicator is rendered at all.
+	getNowIndicatorUnit: function() {
+		// subclasses should implement
+	},
+
+
+	// Renders a current time indicator at the given datetime
+	renderNowIndicator: function(date) {
+		// subclasses should implement
+	},
+
+
+	// Undoes the rendering actions from renderNowIndicator
+	unrenderNowIndicator: function() {
+		// subclasses should implement
+	},
+
+
 	/* Dimensions
 	------------------------------------------------------------------------------------------------------------------*/
 
@@ -450,6 +535,7 @@ var View = FC.View = Class.extend({
 
 		this.updateHeight(isResize);
 		this.updateWidth(isResize);
+		this.updateNowIndicator();
 
 		if (isResize) {
 			this.setScroll(scrollState);
@@ -558,12 +644,19 @@ var View = FC.View = Class.extend({
 
 	// Does everything necessary to clear the view's currently-rendered events
 	clearEvents: function() {
+		var scrollState;
+
 		if (this.isEventsRendered) {
+
+			// TODO: optimize: if we know this is part of a displayEvents call, don't queryScroll/setScroll
+			scrollState = this.queryScroll();
+
 			this.triggerEventUnrender();
 			if (this.destroyEvents) {
 				this.destroyEvents(); // TODO: deprecate
 			}
 			this.unrenderEvents();
+			this.setScroll(scrollState);
 			this.isEventsRendered = false;
 		}
 	},

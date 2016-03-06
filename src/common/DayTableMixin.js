@@ -290,13 +290,23 @@ var DayTableMixin = FC.DayTableMixin = {
 	},
 
 
-	renderHeadDateCellHtml: function(date, colspan) {
+	// TODO: when internalApiVersion, accept an object for HTML attributes
+	// (colspan should be no different)
+	renderHeadDateCellHtml: function(date, colspan, otherAttrs) {
 		var view = this.view;
 
 		return '' +
 			'<th class="fc-day-header ' + view.widgetHeaderClass + ' fc-' + dayIDs[date.day()] + '"' +
-				(colspan > 1 ? ' colspan="' + colspan + '"' : '') +
-				'>' +
+				(this.rowCnt == 1 ?
+					' data-date="' + date.format('YYYY-MM-DD') + '"' :
+					'') +
+				(colspan > 1 ?
+					' colspan="' + colspan + '"' :
+					'') +
+				(otherAttrs ?
+					' ' + otherAttrs :
+					'') +
+			'>' +
 				htmlEscape(date.format(this.colHeadFormat)) +
 			'</th>';
 	},
@@ -334,7 +344,7 @@ var DayTableMixin = FC.DayTableMixin = {
 	},
 
 
-	renderBgCellHtml: function(date) {
+	renderBgCellHtml: function(date, otherAttrs) {
 		var view = this.view;
 		var classes = this.getDayClasses(date);
 
@@ -342,6 +352,9 @@ var DayTableMixin = FC.DayTableMixin = {
 
 		return '<td class="' + classes.join(' ') + '"' +
 			' data-date="' + date.format('YYYY-MM-DD') + '"' + // if date has a time, won't format it
+			(otherAttrs ?
+				' ' + otherAttrs :
+				'') +
 			'></td>';
 	},
 
@@ -353,6 +366,11 @@ var DayTableMixin = FC.DayTableMixin = {
 	// Generates the default HTML intro for any row. User classes should override
 	renderIntroHtml: function() {
 	},
+
+
+	// TODO: a generic method for dealing with <tr>, RTL, intro
+	// when increment internalApiVersion
+	// wrapTr (scheduler)
 
 
 	/* Utils
