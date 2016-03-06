@@ -26,10 +26,27 @@ function EventManager(options) { // assumed to be a calendar
 	t.mutateEvent = mutateEvent;
 	t.normalizeEventDates = normalizeEventDates;
 	t.normalizeEventTimes = normalizeEventTimes;
+	t.updateBh = updateBh; //<rdvgo/>
+	t.updateScrollTime = updateScrollTime; //<rdvgo/>
 	
 	
 	// imports
 	var reportEvents = t.reportEvents;
+	var getView = t.getView; //<rdvgo/>
+
+
+	//<rdvgo>
+	function updateBh(newBh) {
+		$('.fc-nonbusiness').remove();
+		options.businessHours = newBh;
+		getView().renderBusinessHours();
+	}
+	function updateScrollTime(newScrollTime) {
+		getView().options.scrollTime = newScrollTime;
+		var scrollState = getView().computeInitialScroll();
+		getView().forceScroll(scrollState);
+	}
+	//</rdvgo>
 	
 	
 	// locals
